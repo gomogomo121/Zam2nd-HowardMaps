@@ -21,6 +21,40 @@
 
         body { font-family: 'Inter', sans-serif; margin: 0; display: flex; height: 100vh; background: var(--bg-dark); color: white; overflow: hidden; }
 
+        /* POPUP MODAL STYLES */
+        #welcome-modal {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(8px);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background: var(--panel-bg);
+            padding: 30px;
+            border-radius: 15px;
+            border: 2px solid var(--primary);
+            text-align: center;
+            max-width: 400px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .qr-placeholder {
+            width: 200px;
+            height: 200px;
+            background: white;
+            margin: 20px auto;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .qr-placeholder img { width: 100%; height: 100%; object-fit: contain; }
+        .btn-enter { background: var(--accent); color: white; margin-top: 15px; font-size: 1rem; }
+
         #sidebar { width: var(--sidebar-width); background: var(--panel-bg); border-right: 1px solid #334155; display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; z-index: 1001; }
         .config-section { margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid #475569; }
         h2 { font-size: 0.7rem; margin: 15px 0 10px 0; color: var(--primary); text-transform: uppercase; letter-spacing: 2px; }
@@ -41,7 +75,6 @@
         #map-container { flex-grow: 1; position: relative; }
         #map { height: 100%; width: 100%; cursor: crosshair; }
 
-        /* Live Watermark on Map */
         .map-watermark {
             position: absolute;
             bottom: 10px;
@@ -79,6 +112,18 @@
 </head>
 <body>
 
+    <div id="welcome-modal">
+        <div class="modal-content">
+            <h1 style="color:var(--primary); margin:0;">Zambales Mapper</h1>
+            <p style="font-size: 0.9rem; color:#94a3b8;">Support the developer to keep this tool free!</p>
+            <div class="qr-placeholder">
+                <img src="cashg.png" alt="GCash QR Code">
+            </div>
+            <p style="font-weight:bold;">GCash: Howard Kent A.</p>
+            <button class="btn-enter" onclick="closeModal()">Enter Mapper</button>
+        </div>
+    </div>
+
     <div id="sidebar">
         <div class="config-section">
             <h2>Survey Tools</h2>
@@ -102,12 +147,17 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
+        // MODAL LOGIC
+        function closeModal() {
+            document.getElementById('welcome-modal').style.display = 'none';
+        }
+
         var map = L.map('map', { 
-    zoomControl: false, 
-    preferCanvas: true,
-    zoomSnap: 0.25,         // Allows zooming in small increments (0.25 instead of 1.0)
-    wheelPxPerZoomLevel: 120 // Higher number = slower, smoother scrolling
-}).setView([14.913722, 120.200507], 16);
+            zoomControl: false, 
+            preferCanvas: true,
+            zoomSnap: 0.25,
+            wheelPxPerZoomLevel: 120 
+        }).setView([14.913722, 120.200507], 16);
 
         L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
             maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'], attribution: '©2026 Google', crossOrigin: 'anonymous'
@@ -261,19 +311,13 @@
                 backgroundColor: "#000"
             }).then(canvas => {
                 const ctx = canvas.getContext('2d');
-                
-                // Add Watermark to the PNG Canvas
-                ctx.fillStyle = "rgba(239, 68, 68, 0.8)"; // var(--primary)
+                ctx.fillStyle = "rgba(239, 68, 68, 0.8)";
                 ctx.font = "bold 14px Inter, sans-serif";
                 ctx.textAlign = "right";
-                
-                // Position watermark 20px from bottom-right
                 const x = canvas.width - 20;
                 const y = canvas.height - 20;
-                
                 ctx.fillText("ZAMBALES PRECISION MAPPER", x, y);
 
-                // Download
                 const link = document.createElement('a');
                 link.download = `ZAMBALES_SURVEY_${Date.now()}.png`;
                 link.href = canvas.toDataURL("image/png");
@@ -289,6 +333,4 @@
         }
     </script>
 </body>
-
 </html>
-
