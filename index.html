@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zambales Precision Mapper - Watermarked</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
+    <style>
+        :root {
+            --sidebar-width: 320px;
+            --primary: #ef4444; 
+            --bg-dark: #0f172a;
+            --panel-bg: #1e293b;
+            --accent: #10b981;
+            --point-color: #3b82f6;
+            --export: #8b5cf6;
+        }
+
+        body { font-family: 'Inter', sans-serif; margin: 0; display: flex; height: 100vh; background: var(--bg-dark); color: white; overflow: hidden; }
+
+        #sidebar { width: var(--sidebar-width); background: var(--panel-bg); border-right: 1px solid #334155; display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; z-index: 1001; }
+        .config-section { margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid #475569; }
+        h2 { font-size: 0.7rem; margin: 15px 0 10px 0; color: var(--primary); text-transform: uppercase; letter-spacing: 2px; }
+
+        button { width: 100%; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 10px; }
+        .btn-add { background: var(--primary); color: white; }
+        .btn-point { background: var(--point-color); color: white; }
+        .btn-export { background: var(--export); color: white; margin-top: 10px; }
+        .active { background: #fbbf24 !important; color: #0f172a !important; }
+        .btn-finish { background: var(--accent); color: white; }
+        .btn-finish:disabled { opacity: 0.2; }
+
+        #data-list { flex-grow: 1; overflow-y: auto; }
+        .item-card { background: #0f172a; padding: 8px; border-radius: 6px; margin-bottom: 8px; border: 1px solid #334155; }
+        .item-row { display: flex; gap: 8px; align-items: center; }
+        .name-input { flex-grow: 1; background: #1e293b; border: 1px solid #475569; color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; }
+        
+        #map-container { flex-grow: 1; position: relative; }
+        #map { height: 100%; width: 100%; cursor: crosshair; }
+
+        /* Live Watermark on Map */
+        .map-watermark {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(15, 23, 42, 0.7);
+            color: var(--primary);
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            pointer-events: none;
+            border: 1px solid var(--primary);
+            text-transform: uppercase;
+        }
+
+        .coord-bubble {
+            background: rgba(15, 23, 42, 0.9) !important;
+            border: 2px solid var(--primary) !important;
+            border-radius: 4px !important;
+            color: white !important;
+            padding: 4px 8px !important;
+            font-size: 10px !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
+            pointer-events: none;
+        }
+        
+        .point-bubble { border-color: var(--point-color) !important; }
+        .bubble-title { color: var(--primary); font-weight: 800; display: block; }
+        .point-bubble .bubble-title { color: var(--point-color); }
+        .bubble-meta { color: #94a3b8; font-family: monospace; display: block; font-size: 9px; }
+        .bubble-dist { color: #fbbf24; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <div class="config-section">
+            <h2>Survey Tools</h2>
+            <button id="addPathBtn" class="btn-add" onclick="toggleMode('path')">+ Start New Path</button>
+            <button id="addPointBtn" class="btn-point" onclick="toggleMode('point')">+ Add Single Point</button>
+            <button id="finishBtn" class="btn-finish" onclick="finishPath()" disabled>Save Current Path</button>
+            
+            <hr style="border:0; border-top:1px solid #475569; margin: 15px 0;">
+            <h2>Export Tools</h2>
+            <button id="exportBtn" class="btn-export" onclick="exportMap()">📸 Export Map Snapshot</button>
+        </div>
+        <h2>Saved Assets</h2>
+        <div id="data-list"></div>
+    </div>
+
+    <div id="map-container">
+        <div id="map"></div>
+        <div class="map-watermark">Mapper by: Howard Kent C. Abiera</div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        var map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([14.913722, 120.200507], 16);
+
+        L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+            maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'], attribution: '©2026 Google', crossOrigin: 'anonymous'
+        }).addTo(map);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', { 
+            pane: 'shadowPane', opacity: 0.8, crossOrigin: 'anonymous'
+        }).addTo(map);
+
+        var mode = null, isDrawing = false, currentPathCoords = [], currentPolyline = null, currentMarkers = [], liveMarker = null, savedAssets = [];
+
+        function toggleMode(newMode) {
+            if (mode === 'path' && isDrawing && currentPathCoords.length > 0) finishPath();
+            document.getElementById('addPathBtn').classList.remove('active');
+            document.getElementById('addPointBtn').classList.remove('active');
+            if (mode === newMode) { mode = null; return; }
+            mode = newMode;
+            if (mode === 'path') {
+                isDrawing = true;
+                document.getElementById('addPathBtn').classList.add('active');
+                document.getElementById('finishBtn').disabled = false;
+                currentPathCoords = []; currentMarkers = [];
+                currentPolyline = L.polyline([], { color: '#ef4444', weight: 4, dashArray: '4, 8' }).addTo(map);
+            } else {
+                document.getElementById('addPointBtn').classList.add('active');
+                document.getElementById('finishBtn').disabled = true;
+            }
+        }
+
+        map.on('click', function(e) {
+            if (mode === 'path') {
+                currentPathCoords.push(e.latlng);
+                currentPolyline.setLatLngs(currentPathCoords);
+                refreshPathMarkers();
+            } else if (mode === 'point') {
+                dropSinglePoint(e.latlng);
+            }
+        });
+
+        map.on('contextmenu', function(e) {
+            if (mode !== 'path' || !isDrawing || currentPathCoords.length === 0) return;
+            currentPathCoords.pop();
+            currentPolyline.setLatLngs(currentPathCoords);
+            refreshPathMarkers();
+        });
+
+        map.on('mousemove', function(e) {
+            if (mode !== 'path' || !isDrawing || currentPathCoords.length === 0) return;
+            let tempCoords = [...currentPathCoords, e.latlng];
+            currentPolyline.setLatLngs(tempCoords);
+            if (liveMarker) map.removeLayer(liveMarker);
+            liveMarker = L.marker(e.latlng, { 
+                icon: L.divIcon({ className: 'dummy', html: `<div style="background:rgba(15,23,42,0.8); color:#fbbf24; padding:2px 6px; border:2px solid #ef4444; font-weight:bold; font-size:10px; transform:translateY(-22px); border-radius:3px; white-space:nowrap;">${calculateDist(tempCoords)}m</div>` }) 
+            }).addTo(map);
+        });
+
+        function dropSinglePoint(latlng) {
+            const id = Date.now();
+            const name = "Point " + (savedAssets.filter(a => a.type === 'point').length + 1);
+            const marker = L.circleMarker(latlng, { radius: 7, fillColor: "#3b82f6", color: "#fff", weight: 2, fillOpacity: 1 }).addTo(map);
+            const content = `<span class="bubble-title">${name}</span><span class="bubble-meta">${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</span>`;
+            marker.bindTooltip(content, { permanent: true, direction: 'top', className: 'coord-bubble point-bubble' });
+            savedAssets.push({ id: id, type: 'point', name: name, marker: marker, latlng: latlng });
+            updateSidebar();
+        }
+
+        function refreshPathMarkers() {
+            currentMarkers.forEach(m => map.removeLayer(m));
+            currentMarkers = [];
+            if (currentPathCoords.length === 0) return;
+            let startM = L.circleMarker(currentPathCoords[0], { radius: 5, fillColor: "#10b981", color: "#fff", weight: 2, fillOpacity: 1 }).addTo(map);
+            startM.bindTooltip("START", { permanent: true, direction: 'top', className: 'coord-bubble' });
+            currentMarkers.push(startM);
+            if (currentPathCoords.length > 1) {
+                let endM = L.circleMarker(currentPathCoords[currentPathCoords.length - 1], { radius: 5, fillColor: "#ef4444", color: "#fff", weight: 2, fillOpacity: 1 }).addTo(map);
+                endM.bindTooltip("END", { permanent: true, direction: 'top', className: 'coord-bubble' });
+                currentMarkers.push(endM);
+            }
+        }
+
+        function finishPath() {
+            if (!isDrawing) return;
+            if (liveMarker) { map.removeLayer(liveMarker); liveMarker = null; }
+            if (currentPathCoords.length >= 2) {
+                currentPolyline.setLatLngs(currentPathCoords);
+                const d = calculateDist(currentPathCoords);
+                const id = Date.now();
+                const name = "Path " + (savedAssets.filter(a => a.type === 'path').length + 1);
+                currentMarkers[0].setTooltipContent(`<span class="bubble-title">${name}</span><span class="bubble-dist">${d}m</span><span class="bubble-meta">${currentPathCoords[0].lat.toFixed(5)}, ${currentPathCoords[0].lng.toFixed(5)}</span>`);
+                currentMarkers[currentMarkers.length-1].setTooltipContent(`<span class="bubble-title">END</span><span class="bubble-meta">${currentPathCoords[currentPathCoords.length-1].lat.toFixed(5)}, ${currentPathCoords[currentPathCoords.length-1].lng.toFixed(5)}</span>`);
+                savedAssets.push({ id: id, type: 'path', name: name, length: d, polyline: currentPolyline, markers: [...currentMarkers], latlng: currentPathCoords[0] });
+                updateSidebar();
+            } else {
+                if(currentPolyline) map.removeLayer(currentPolyline);
+                currentMarkers.forEach(m => map.removeLayer(m));
+            }
+            isDrawing = false; mode = null;
+            document.getElementById('addPathBtn').classList.remove('active');
+            document.getElementById('finishBtn').disabled = true;
+        }
+
+        function updateSidebar() {
+            const listDiv = document.getElementById('data-list');
+            listDiv.innerHTML = '';
+            savedAssets.forEach(asset => {
+                const item = document.createElement('div');
+                item.className = 'item-card';
+                item.innerHTML = `<div class="item-row"><input type="text" class="name-input" value="${asset.name}" oninput="renameAsset(${asset.id}, this.value)"><button style="background:var(--primary); border:none; color:white; border-radius:4px; width:28px; height:26px; cursor:pointer;" onclick="deleteAsset(${asset.id})">×</button></div>`;
+                listDiv.appendChild(item);
+            });
+        }
+
+        function renameAsset(id, val) {
+            const asset = savedAssets.find(x => x.id === id);
+            if (asset) {
+                asset.name = val;
+                const m = (asset.type === 'path') ? asset.markers[0] : asset.marker;
+                const extra = asset.length ? `<span class="bubble-dist">${asset.length}m</span>` : '';
+                m.setTooltipContent(`<span class="bubble-title">${val}</span>${extra}<span class="bubble-meta">${asset.latlng.lat.toFixed(5)}, ${asset.latlng.lng.toFixed(5)}</span>`);
+            }
+        }
+
+        function deleteAsset(id) {
+            const idx = savedAssets.findIndex(a => a.id === id);
+            if (idx > -1) {
+                const a = savedAssets[idx];
+                if (a.type === 'path') { map.removeLayer(a.polyline); a.markers.forEach(m => map.removeLayer(m)); } 
+                else { map.removeLayer(a.marker); }
+                savedAssets.splice(idx, 1);
+                updateSidebar();
+            }
+        }
+
+        function calculateDist(coords) {
+            let total = 0;
+            for (let i = 0; i < coords.length - 1; i++) { total += coords[i].distanceTo(coords[i+1]); }
+            return total.toFixed(2);
+        }
+
+        function exportMap() {
+            const exportBtn = document.getElementById('exportBtn');
+            exportBtn.innerText = "Burning Watermark...";
+            exportBtn.disabled = true;
+
+            const mapElement = document.getElementById('map');
+
+            html2canvas(mapElement, {
+                useCORS: true,
+                allowTaint: false,
+                ignoreElements: (node) => node.classList.contains('leaflet-control-container'),
+                backgroundColor: "#000"
+            }).then(canvas => {
+                const ctx = canvas.getContext('2d');
+                
+                // Add Watermark to the PNG Canvas
+                ctx.fillStyle = "rgba(239, 68, 68, 0.8)"; // var(--primary)
+                ctx.font = "bold 14px Inter, sans-serif";
+                ctx.textAlign = "right";
+                
+                // Position watermark 20px from bottom-right
+                const x = canvas.width - 20;
+                const y = canvas.height - 20;
+                
+                ctx.fillText("ZAMBALES PRECISION MAPPER", x, y);
+
+                // Download
+                const link = document.createElement('a');
+                link.download = `ZAMBALES_SURVEY_${Date.now()}.png`;
+                link.href = canvas.toDataURL("image/png");
+                link.click();
+                
+                exportBtn.innerText = "📸 Export Map Snapshot";
+                exportBtn.disabled = false;
+            }).catch(err => {
+                console.error(err);
+                exportBtn.innerText = "📸 Export Failed";
+                exportBtn.disabled = false;
+            });
+        }
+    </script>
+</body>
+</html>
